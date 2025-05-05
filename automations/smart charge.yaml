@@ -1,0 +1,274 @@
+alias: Smart Charge
+description: Smart Charge
+triggers:
+  - entity_id:
+      - sensor.throttled_site_power
+    trigger: state
+  - entity_id:
+      - input_select.charge_mode
+    trigger: state
+conditions:
+  - condition: template
+    value_template: "{{ charge_control_on or connector_status_charging }}"
+    alias: If Charging
+  - condition: not
+    conditions:
+      - condition: state
+        entity_id: input_select.charge_mode
+        state: "Off"
+    alias: If Charge Mode is not Off
+actions:
+  - choose:
+      - conditions:
+          - condition: state
+            entity_id: input_select.charge_mode
+            state: Fast
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ not charge_control }}"
+                alias: If Charge Control not Enabled
+            then:
+              - action: switch.turn_on
+                target:
+                  entity_id: "{{ switch_id }}"
+                alias: Turn on Charge Control
+            alias: Turn on Charge Control if Off
+          - if:
+              - condition: state
+                state: "on"
+                entity_id: input_boolean.smart_charge
+            then:
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.smart_charge
+                data: {}
+            alias: Turn off Smart Charge if On
+          - action: input_number.set_value
+            metadata: {}
+            data:
+              value: "32"
+            target:
+              entity_id: input_number.smart_charge_set_amps
+          - if:
+              - condition: state
+                entity_id: timer.turn_off_car_charger
+                state: active
+            then:
+              - action: timer.cancel
+                target:
+                  entity_id: timer.turn_off_car_charger
+                data: {}
+            alias: Cancel Turn Off Timer if Running
+      - conditions:
+          - condition: state
+            entity_id: input_select.charge_mode
+            state: Fixed
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ not charge_control }}"
+                alias: If Charge Control not Enabled
+            then:
+              - action: switch.turn_on
+                target:
+                  entity_id: "{{ switch_id }}"
+                alias: Turn on Charge Control
+            alias: Turn on Charge Control if Off
+          - if:
+              - condition: state
+                entity_id: timer.turn_off_car_charger
+                state: active
+            then:
+              - action: timer.cancel
+                target:
+                  entity_id: timer.turn_off_car_charger
+                data: {}
+            alias: Cancel Turn Off Timer if Running
+      - conditions:
+          - condition: template
+            value_template: "{{ dampened_spare_amps >= minimum_start_amps }}"
+            alias: If enough Amps to start charging
+          - condition: template
+            value_template: "{{ not charge_control }}"
+            alias: If Charge Control not Enabled
+        sequence:
+          - data:
+              name: Smart Charge
+              message: >-
+                Charger is off and we have {{ dampened_spare_amps }} spare amps.
+                Attempting to start charge
+            action: logbook.log
+          - if:
+              - condition: state
+                entity_id: timer.turn_off_car_charger
+                state: active
+            then:
+              - action: timer.cancel
+                target:
+                  entity_id: timer.turn_off_car_charger
+                data: {}
+            alias: Cancel Turn Off Timer if Running
+          - action: input_number.set_value
+            metadata: {}
+            data:
+              value: "{{ new_charge_amps }}"
+            target:
+              entity_id: input_number.smart_charge_set_amps
+          - action: switch.turn_on
+            target:
+              entity_id: "{{ switch_id }}"
+            alias: Turn on Charge Control
+        alias: If not charging, and sufficient power to start
+      - conditions:
+          - condition: template
+            value_template: "{{ charge_control_on or connector_status_charging }}"
+            alias: If Charging
+          - condition: template
+            value_template: "{{ dampened_spare_amps > 0 }}"
+            alias: If Spare Amps
+          - condition: template
+            value_template: "{{ current_charging_amps < max_charging_amps }}"
+            alias: If Headroom
+        sequence:
+          - data:
+              name: Smart Charge
+              message: >-
+                Charger is on and we have {{ dampened_spare_amps }} spare amps.
+                Already at {{ current_charging_amps }} amps. Attempting to
+                increase charge rate to {{ new_charge_amps | int }} amps
+            action: logbook.log
+          - if:
+              - condition: state
+                entity_id: timer.turn_off_car_charger
+                state: active
+            then:
+              - action: timer.cancel
+                target:
+                  entity_id: timer.turn_off_car_charger
+                data: {}
+            alias: Cancel Turn Off Timer if Running
+          - action: input_number.set_value
+            metadata: {}
+            data:
+              value: "{{ new_charge_amps | int }}"
+            target:
+              entity_id: input_number.smart_charge_set_amps
+        alias: If charging, and excess power
+      - conditions:
+          - condition: template
+            value_template: "{{ charge_control_on or connector_status_charging }}"
+            alias: If Charging
+          - condition: template
+            value_template: "{{ new_charge_amps < min_charging_amps }}"
+            alias: If new charge amps < min charge amps
+        sequence:
+          - data:
+              name: Smart Charge
+              message: >-
+                Charger is on and we do not have enough excess power to even
+                charge at {{ min_charging_amps }}A. Turning off charger in 2
+                minutes. (new_charge:{{ new_charge_amps }}A < min_charging:{{
+                min_charging_amps }}A) (current_charging:{{
+                current_charging_amps }}A + spare:{{ dampened_spare_amps }}A)
+                (power out:{{ spare_energy }})
+            action: logbook.log
+          - action: input_number.set_value
+            metadata: {}
+            data:
+              value: "{{ off_charging_amps }}"
+            target:
+              entity_id: input_number.smart_charge_set_amps
+          - alias: If Turn Off timer is paused or idle, Start Turn Off Timer
+            if:
+              - condition: or
+                conditions:
+                  - condition: state
+                    entity_id: timer.turn_off_car_charger
+                    state: idle
+                  - condition: state
+                    entity_id: timer.turn_off_car_charger
+                    state: paused
+                alias: If Turn Off timer is paused or idle
+            then:
+              - target:
+                  entity_id: timer.turn_off_car_charger
+                data:
+                  duration: "00:03:02"
+                action: timer.start
+                alias: Start Turn Off Timer
+        alias: If charging, and below minimum amps
+      - conditions:
+          - condition: template
+            value_template: "{{ charge_control_on or connector_status_charging }}"
+            alias: If Charging
+          - condition: template
+            value_template: "{{ dampened_spare_amps < 0 }}"
+            alias: If insufficient amps
+        sequence:
+          - variables:
+              temp_charge_amps: "{{ [min_charging_amps, new_charge_amps] | max }}"
+          - data:
+              name: Smart Charge
+              message: >-
+                Charger is on and we are using {{ dampened_spare_amps }} too
+                many amps. Attempting to decrease charge rate to:{{
+                temp_charge_amps }}
+            action: logbook.log
+          - action: input_number.set_value
+            metadata: {}
+            data:
+              value: "{{ temp_charge_amps | int }}"
+            target:
+              entity_id: input_number.smart_charge_set_amps
+        alias: If charging, and deficit excess
+    default:
+      - choose:
+          - conditions:
+              - condition: state
+                entity_id: timer.turn_off_car_charger
+                state: active
+            sequence:
+              - target:
+                  entity_id: timer.turn_off_car_charger
+                action: timer.cancel
+                data: {}
+        alias: Cancel Timer
+variables:
+  power_id: sensor.site_power
+  charging_amps_id: sensor.charging_amps
+  voltage_id: sensor.voltage_source
+  off_charging_amps: 0
+  min_charging_amps: 4
+  minimum_start_amps: 6
+  never_exceed_amps: 32
+  charger_id: "{{ states('input_text.charger_serial') }}"
+  connector: "{{ charger_id ~ '_status_connector' }}"
+  connector_id: "{{ 'sensor.' ~ connector }}"
+  control: "{{ charger_id ~ '_charge_control' }}"
+  control_id: "{{ 'switch.' ~ control }}"
+  current: "{{ charger_id ~ '_maximum_current' }}"
+  current_id: "{{ 'number.' ~ current }}"
+  status_connector: "{{ states.sensor[connector].state }}"
+  charge_control: "{{ states.switch[control].state }}"
+  maximum_current: "{{ states.number[current].attributes.max }}"
+  max_charging_amps: "{{ maximum_current | int(never_exceed_amps) }}"
+  current_charging_amps: "{{ states(charging_amps_id) | float }}"
+  site_power: "{{ states(power_id) | float }}"
+  voltage: "{{ states(voltage_id) | float }}"
+  excess_amps: "{{ ( site_power / voltage ) * -1.0 | float }}"
+  spare_amps: >-
+    {{ excess_amps if states('input_select.charge_mode') != 'Fast' else 0 |
+    round(0, 'floor') | int }}
+  dampened_spare_amps: >-
+    {{ [spare_amps, minimum_start_amps if (spare_amps > minimum_start_amps and
+    current_charging_amps < minimum_start_amps) else 2 ] | min }}
+  working_charge_amps: "{{ (current_charging_amps + dampened_spare_amps) | int }}"
+  new_charge_amps: >-
+    {{ working_charge_amps if working_charge_amps > min_charging_amps else
+    off_charging_amps }}
+  charge_control_on: "{{ charge_control == 'on' }}"
+  connector_status_charging: "{{ status_connector == 'Charging' }}"
+mode: single
+trace:
+  stored_traces: 30
