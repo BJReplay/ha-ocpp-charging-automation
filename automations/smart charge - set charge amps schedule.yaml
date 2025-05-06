@@ -1,0 +1,28 @@
+alias: Smart Charge - Set Charge Amps Schedule
+description: Smart Charge - Set Charge Amps Schedule
+triggers: []
+conditions: []
+actions:
+  - action: ocpp.set_charge_rate
+    data:
+      custom_profile: |
+        {
+           "chargingProfileId": 1,
+           "stackLevel": 0,
+           "chargingProfilePurpose": "TxDefaultProfile",
+           "chargingProfileKind": "Recurring",
+           "recurrencyKind": "Daily",
+           "chargingSchedule": {
+             "startSchedule": "2025-03-11T13:00:00Z",
+             "chargingRateUnit": "A",
+             "chargingSchedulePeriod": [
+               { "startPeriod": 0, "limit": 0 },
+               { "startPeriod": 32400, "limit": 6 },
+               { "startPeriod": 39600, "limit": 32 },
+               { "startPeriod": 50100, "limit": 6 },
+               { "startPeriod": 64800, "limit": 0 }
+             ]
+           }
+        }
+      conn_id: 1
+mode: single

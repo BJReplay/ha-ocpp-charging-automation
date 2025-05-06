@@ -1,0 +1,38 @@
+description: Smart Charge - Set Charge Amps
+mode: queued
+triggers:
+  - trigger: state
+    entity_id:
+      - input_number.smart_charge_set_amps
+    id: Change Rate
+conditions: []
+actions:
+  - action: ocpp.set_charge_rate
+    data:
+      custom_profile: |
+        {
+           "transactionId": {{current_transaction_id}},
+           "chargingProfileId": 1,
+           "stackLevel": 1,
+           "chargingProfilePurpose": "TxProfile",
+           "chargingProfileKind": "Relative",
+           "chargingSchedule": {
+             "chargingRateUnit": "A",
+             "chargingSchedulePeriod": [{"startPeriod": 0, "limit": {{ states('input_number.smart_charge_set_amps') | int }}}]
+          }
+        }
+      conn_id: 1
+variables:
+  charger_id: "{{ states('input_text.charger_serial') }}"
+  connector: "{{ charger_id ~ '_status_connector' }}"
+  connector_id: "{{ 'sensor.' ~ connector }}"
+  status_connector: "{{ states.sensor[connector].state }}"
+  transaction_id: "{{ charger_id ~ '_transaction_id' }}"
+  current_transaction_id: "{{ states.sensor[transaction_id].state | int }}"
+  control: "{{ charger_id ~ '_charge_control' }}"
+  control_id: "{{ 'switch.' ~ control }}"
+  charge_control: "{{ states.switch[control].state }}"
+  charge_control_on: "{{ charge_control == 'on' }}"
+max: 5
+trace:
+  stored_traces: 25
