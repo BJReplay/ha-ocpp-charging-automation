@@ -1,0 +1,19 @@
+alias: Smart Charge - Turn off car charger
+description: Turns off charging by setting amps to zero.
+triggers:
+  - event_type: timer.finished
+    event_data:
+      entity_id: timer.turn_off_car_charger
+    trigger: event
+  - trigger: state
+    entity_id:
+      - input_select.charge_mode
+    to: "Off"
+conditions: []
+actions:
+  - target:
+      entity_id: input_number.smart_charge_set_amps
+    data:
+      value: 0
+    action: input_number.set_value
+mode: single
