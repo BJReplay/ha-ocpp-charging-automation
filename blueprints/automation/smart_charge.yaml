@@ -1,0 +1,650 @@
+###############################################################################
+# Disclaimer:
+#
+# Even though this automation has been created with care, the author cannot be
+# responsible for any damages caused by this automation.  Use at your own risk.
+#
+###############################################################################
+# Objective:
+# - Use OCPP to charge EV from surplus solar and weather forecast.
+#
+# History:
+# 2025-12-28 Inspiration from flashg1's Solar Charger Blueprint 2025-02-01.
+###############################################################################
+blueprint:
+  name: Smart Charge OCPP Solar Charger Automation
+  description: >
+    Use OCPP to charge EV from surplus solar, use local battery for fast charging
+    and use off peak tariff for fast charging.
+    See [GitHub project page](https://github.com/BJReplay/ha-ocpp-charging-automation) for details.
+
+
+    The following items are required as a minimum for a functional Blueprint:
+      * Off Charging Amps (defaults to 0A)
+      * Minimum Charging Amps (defaults to 6A)
+      * Never Exceed Amps (defaults to 32A)
+      * Battery Discharge Power (or 0 to not use local battery or no battery available)
+      * Site (Grid) Power Sensor
+      * Voltage Sensor (defaults to 230V)
+      * OCPP Charger ID
+
+    The following configs are optional:
+      * Battery Boost Reserve Level (stop using battery boost when local battery at this level - defaults to 100% - do not use battery)
+      * Battery Boost Automatically Threshold (start using battery boost when local battery at this level - defaults to 0% - do not use)
+      * Local Battery State of Charge (SoC) Sensor (defaults to 0 SoC if not supplied - local battery boost disabled)
+
+    Helpers can be created on form or at Settings > Devices & Services > Helpers > Create helper.
+
+    **Version**: v0.8
+
+  domain: automation
+
+  #####################################
+  # Blueprint inputs
+  #####################################
+  input:
+    mandatory:
+      name: Mandatory Inputs
+      icon: mdi:ev-plug-type2
+      description: Mandatory Settings required to allow the Blueprint to run.
+      input:
+        power_sensor:
+          name: Site (Grid) Power Sensor
+          description: >
+            Sensor that expresses negative value in Watts for available power for charging or positive value for consumed power.
+            This sensor is the feedback loop for adjusting power consumption.
+              * Default: sensor.site_power
+          default: sensor.site_power
+          selector:
+            entity:
+              domain:
+                - sensor
+
+        charger_sensor:
+          name: OCPP Charger ID
+          description: >
+            Sensor or input text helper to specify charger name (serial number).
+            Ideally specify a input text helper so that the automation can automatically pick up the correct charger.
+          default: input_text.charger_serial
+          selector:
+            entity:
+              domain:
+                - sensor
+                - input_text
+
+    optional:
+      name: Optional Inputs
+      icon: mdi:chat-question-outline
+      description: Optional Settings to override defaults or provide fine control.
+      input:
+        voltage_sensor:
+          name: Charger Line to Neutral voltage
+          description: >
+            Sensor or input number helper to specify charger voltage in Volts.
+            Ideally specify a voltage source sensor so that power caculations are dynamic based on measured voltage
+              * Default:  230V
+          default: sensor.voltage_source
+          selector:
+            entity:
+              domain:
+                - sensor
+                - input_number
+
+        phases_input:
+          name: Number of Phases
+          description: >
+            Number of phases used by charger - TODO - currently only single phase supported
+              * Default:  1Ø
+          default: 1
+          selector:
+            number:
+              min: 1
+              max: 1
+              mode: box
+
+        never_exceed_amps_input:
+          name: Charger maximum current
+          description: >
+            Specify charger maximum current in Ampere.
+              * Default:  32A
+          default: 32
+          selector:
+            number:
+              min: 1
+              max: 32
+              unit_of_measurement: amp
+              mode: box
+
+        off_charging_amps_input:
+          name: Charger turn off current
+          description: >
+            Specify charger turn off current in Amperes.
+            If the charger current is set to less than 6A, some OCPP chargers will go into stand-by, but won't turn off.
+            Other chargers will turn off.  Many OCPP chargers will turn off if the current is set to a value below 6A.
+              * Default:  0A
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 5
+              unit_of_measurement: amp
+              mode: box
+
+        min_charging_amps_input:
+          name: Charger minimum workable current
+          description: >
+            Specify charger minimum workable current in Amperes.
+            If available current falls below the charger minimum workable current, the charge current will 
+            be set to the Charger turn off current specified above.
+            OCPP charger may require the minimum workable current to be set to 6A.
+              * Default:  6A
+          default: 6
+          selector:
+            number:
+              min: 6
+              max: 32
+              unit_of_measurement: amp
+              mode: box
+
+        minimum_start_amps_input:
+          name: Charger minimum start current
+          description: >
+            Specify charger start current in Amperes.
+            If spare site current exceeds minimum start current, the charger will be started.
+            OCPP charger may require the minimum start current to be set to 6A.
+              * Default:  6A
+          default: 6
+          selector:
+            number:
+              min: 0
+              max: 32
+              unit_of_measurement: amp
+              mode: box
+
+        battery_discharge_power_input:
+          name: Houshold battery discharge power
+          description: >
+            Available maximum battery discharge power to support household battery boost charging.
+            This is specified in watts, and if allowed to default to zero will prevent battery boost charging
+              * Default:  0W
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 10000
+              unit_of_measurement: watt
+              mode: box
+
+        battery_reserve_sensor:
+          name: Battery Boost Reserve Charge
+          description: >
+            Input number helper to specify minimum home battery charge to hold.
+            Ideally specify a input number helper that you can use to adjust the minimum reserve to hold at the end of
+            battery boost sessions (or a fixed minimum reserve value) to be used.  If not specified, a reserve of 100%
+            is used (i.e. battery boost is not used)
+              * Default:  100%
+          default: input_number.battery_boost_reserve
+          selector:
+            entity:
+              domain:
+                - input_number
+
+        battery_threshold_sensor:
+          name: Battery Boost Start Threshold
+          description: >
+            Input number helper or input to specify starting home battery charge to initiate battery boost charging.
+            Ideally specify a input number helper that you can use to adjust the starting charge to intiate battery 
+            boost sessions (or a fixed starting charge value) to be used.  If not specified, a reserve of 0% is used
+            (i.e. battery boost is not used)
+          default: input_number.battery_boost_start_threshold
+          selector:
+            entity:
+              domain:
+                - input_number
+
+        battery_soc_sensor:
+          name: Home Battery State of Charge (SoC) Sensor
+          description: >
+            Sensor for home battery, or leave as blank for no home battery installed.
+          default: sensor.powerwall_charge
+          selector:
+            entity:
+              domain:
+                - sensor
+
+        solar_sensor:
+          name: Solar Power Sensor
+          description: >
+            Sensor that provides positive power in Watts for available power for charging when running in battery boost mode.
+          default: sensor.solar_power
+          selector:
+            entity:
+              domain:
+                - sensor
+
+        charging_amps_sensor:
+          name: Charging Amps Sensor
+          description: >
+            Sensor that provides quick feedback on actual delivered current to the car charger.
+          default: sensor.charging_amps
+          selector:
+            entity:
+              domain:
+                - sensor
+
+        off_peak_end_sensor:
+          name: End of Off Peak Helper
+          description: >
+            Datetime helper to specify end of off peak time.
+
+            Ideally specify the same helper that you use to manage your tariffs / automation so that power when you switch off processes that
+            utilise cheap power, they are sychronised to use this time.
+
+            At this release, this time is used to check whether or not to enable battery boost charging: it is enabled (if all other tests allow
+            it to be started) only before the end of off peak.  It is never started after the end of off peak, as it is assumed that the home
+            battery is required for household load after the end of off peak.
+          default: input_datetime.off_peak_energy_end
+          selector:
+            entity:
+              domain:
+                - input_datetime
+
+###############################################################################
+# Trigger variables
+###############################################################################
+trigger_variables:
+  minimum_start_amps: !input minimum_start_amps_input
+  power_id: !input power_sensor
+  solar_id: !input solar_sensor
+  charging_amps_id: !input charging_amps_sensor
+  voltage_id: !input voltage_sensor
+  battery_reserve_id: !input battery_reserve_sensor
+  battery_threshold_id: !input battery_threshold_sensor
+  battery_soc_id: !input battery_soc_sensor
+  off_peak_end_id: !input off_peak_end_sensor
+  charger_name_id: !input charger_sensor
+  off_charging_amps: !input off_charging_amps_input
+  min_charging_amps: !input min_charging_amps_input
+  never_exceed_amps: !input never_exceed_amps_input
+  battery_discharge_power: !input battery_discharge_power_input
+
+###############################################################################
+# Triggers
+###############################################################################
+triggers:
+  - entity_id:
+      - sensor.throttled_site_power
+    trigger: state
+    id: "1"
+    alias: When Throttled Site Power Changes
+  - entity_id:
+      - input_select.charge_mode
+    trigger: state
+    id: "2"
+    alias: When Charge Mode Changes
+  - trigger: numeric_state
+    entity_id:
+      - sensor.charging_amps
+    for:
+      hours: 0
+      minutes: 3
+      seconds: 30
+    below: 6
+    id: "3"
+    alias: >-
+      When Charging Current below OCPP Minimum Set Current for 3 and a half
+      Minutes
+
+###############################################################################
+# Conditions
+###############################################################################
+conditions:
+  - condition: not
+    conditions:
+      - condition: state
+        entity_id: input_select.charge_mode
+        state: "Off"
+    alias: If Charge Mode is not Off
+  - condition: template
+    value_template: "{{ charge_control_on or connector_status_charging }}"
+    alias: If Charging
+
+###############################################################################
+# Actions
+###############################################################################
+actions:
+  - choose:
+      - conditions:
+          - condition: numeric_state
+            entity_id: sensor.charging_amps
+            below: 6
+          - condition: trigger
+            id:
+              - "3"
+            alias: If triggered by below OCPP Minimum Set Current
+        sequence:
+          - action: input_number.set_value
+            metadata: {}
+            data:
+              value: 6
+            target:
+              entity_id: input_number.smart_charge_set_amps
+            alias: Set Charge Amps to 6
+          - action: input_select.select_option
+            metadata: {}
+            data:
+              option: Fixed
+            target:
+              entity_id: input_select.charge_mode
+            alias: Select Charge Mode Fixed
+        alias: If Charger current was below OCPP Minimum Set Current
+      - conditions:
+          - condition: state
+            entity_id: input_select.charge_mode
+            state: Fast
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ not charge_control_on }}"
+                alias: If Charge Control not Enabled
+            then:
+              - action: switch.turn_on
+                target:
+                  entity_id: "{{ switch_id }}"
+                alias: Turn on Charge Control
+            alias: Turn on Charge Control if Off
+          - action: input_number.set_value
+            metadata: {}
+            data:
+              value: "32"
+            target:
+              entity_id: input_number.smart_charge_set_amps
+            alias: Set Charge Amps to 32
+          - if:
+              - condition: state
+                entity_id: timer.turn_off_car_charger
+                state: active
+            then:
+              - action: timer.cancel
+                target:
+                  entity_id: timer.turn_off_car_charger
+                data: {}
+            alias: Cancel Turn Off Timer if Running
+      - conditions:
+          - condition: state
+            entity_id: input_select.charge_mode
+            state:
+              - Battery
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ not charge_control_on }}"
+                alias: If Charge Control not Enabled
+            then:
+              - action: switch.turn_on
+                target:
+                  entity_id: "{{ switch_id }}"
+                alias: Turn on Charge Control
+            alias: Turn on Charge Control if Off
+          - if:
+              - condition: state
+                entity_id: timer.turn_off_car_charger
+                state: active
+            then:
+              - action: timer.cancel
+                target:
+                  entity_id: timer.turn_off_car_charger
+                data: {}
+            alias: Cancel Turn Off Timer if Running
+        alias: If Charge Mode is Battery Boost
+      - conditions:
+          - condition: state
+            entity_id: input_select.charge_mode
+            state: Fixed
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ not charge_control_on }}"
+                alias: If Charge Control not Enabled
+            then:
+              - action: switch.turn_on
+                target:
+                  entity_id: "{{ switch_id }}"
+                alias: Turn on Charge Control
+            alias: Turn on Charge Control if Off
+          - if:
+              - condition: state
+                entity_id: timer.turn_off_car_charger
+                state: active
+            then:
+              - action: timer.cancel
+                target:
+                  entity_id: timer.turn_off_car_charger
+                data: {}
+            alias: Cancel Turn Off Timer if Running
+      - conditions:
+          - condition: template
+            value_template: "{{ dampened_spare_amps >= minimum_start_amps }}"
+            alias: If enough Amps to start charging
+          - condition: template
+            value_template: "{{ not charge_control_on }}"
+            alias: If Charge Control not Turned On
+        sequence:
+          - data:
+              name: Smart Charge
+              message: >-
+                Charger is off and we have {{ dampened_spare_amps }} spare amps.
+                Attempting to start charge
+            action: logbook.log
+          - if:
+              - condition: state
+                entity_id: timer.turn_off_car_charger
+                state: active
+            then:
+              - action: timer.cancel
+                target:
+                  entity_id: timer.turn_off_car_charger
+                data: {}
+            alias: Cancel Turn Off Timer if Running
+          - action: input_number.set_value
+            metadata: {}
+            data:
+              value: "{{ new_charge_amps }}"
+            target:
+              entity_id: input_number.smart_charge_set_amps
+          - action: switch.turn_on
+            target:
+              entity_id: "{{ switch_id }}"
+            alias: Turn on Charge Control
+        alias: If not charging, and sufficient power to start
+      - conditions:
+          - condition: template
+            value_template: "{{ charge_control_on or connector_status_charging }}"
+            alias: If Charging
+          - condition: template
+            value_template: "{{ dampened_spare_amps > 0 }}"
+            alias: If Spare Amps
+          - condition: template
+            value_template: "{{ current_charging_amps < max_charging_amps }}"
+            alias: If Headroom
+        sequence:
+          - data:
+              name: Smart Charge
+              message: >-
+                Charger is on and we have {{ dampened_spare_amps }} spare amps.
+                Already at {{ current_charging_amps }} amps. Attempting to
+                increase charge rate to {{ new_charge_amps | int }} amps
+            action: logbook.log
+          - if:
+              - condition: state
+                entity_id: timer.turn_off_car_charger
+                state: active
+            then:
+              - action: timer.cancel
+                target:
+                  entity_id: timer.turn_off_car_charger
+                data: {}
+            alias: Cancel Turn Off Timer if Running
+          - action: input_number.set_value
+            metadata: {}
+            data:
+              value: "{{ new_charge_amps | int }}"
+            target:
+              entity_id: input_number.smart_charge_set_amps
+        alias: If charging, and excess power
+      - conditions:
+          - condition: template
+            value_template: "{{ charge_control_on or connector_status_charging }}"
+            alias: If Charging
+          - condition: template
+            value_template: "{{ new_charge_amps < min_charging_amps }}"
+            alias: If new charge amps < min charge amps
+        sequence:
+          - data:
+              name: Smart Charge
+              message: >-
+                Charger is on and we do not have enough excess power to even
+                charge at {{ min_charging_amps }}A. Turning off charger in 2
+                minutes. (new_charge:{{ new_charge_amps }}A < min_charging:{{
+                min_charging_amps }}A) (current_charging:{{
+                current_charging_amps }}A + spare:{{ dampened_spare_amps }}A)
+                (power out:{{ spare_energy }})
+            action: logbook.log
+          - action: input_number.set_value
+            metadata: {}
+            data:
+              value: "{{ min_charging_amps }}"
+            target:
+              entity_id: input_number.smart_charge_set_amps
+          - alias: If Turn Off timer is paused or idle, Start Turn Off Timer
+            if:
+              - condition: or
+                conditions:
+                  - condition: state
+                    entity_id: timer.turn_off_car_charger
+                    state: idle
+                  - condition: state
+                    entity_id: timer.turn_off_car_charger
+                    state: paused
+                alias: If Turn Off timer is paused or idle
+            then:
+              - target:
+                  entity_id: timer.turn_off_car_charger
+                data:
+                  duration: "00:03:02"
+                action: timer.start
+                alias: Start Turn Off Timer
+        alias: If charging, and below minimum amps
+      - conditions:
+          - condition: template
+            value_template: "{{ charge_control_on or connector_status_charging }}"
+            alias: If Charging
+          - condition: template
+            value_template: "{{ dampened_spare_amps < 0 }}"
+            alias: If insufficient amps
+        sequence:
+          - variables:
+              temp_charge_amps: "{{ [min_charging_amps, new_charge_amps] | max }}"
+          - data:
+              name: Smart Charge
+              message: >-
+                Charger is on and we are using {{ dampened_spare_amps }} too
+                many amps. Attempting to decrease charge rate to:{{
+                temp_charge_amps }}
+            action: logbook.log
+          - action: input_number.set_value
+            metadata: {}
+            data:
+              value: "{{ temp_charge_amps | int }}"
+            target:
+              entity_id: input_number.smart_charge_set_amps
+          - alias: If Turn Off timer is paused or idle, Start Turn Off Timer
+            if:
+              - condition: or
+                conditions:
+                  - condition: state
+                    entity_id: timer.turn_off_car_charger
+                    state: idle
+                  - condition: state
+                    entity_id: timer.turn_off_car_charger
+                    state: paused
+                alias: If Turn Off timer is paused or idle
+            then:
+              - target:
+                  entity_id: timer.turn_off_car_charger
+                data:
+                  duration: "00:03:02"
+                action: timer.start
+                alias: Start Turn Off Timer
+        alias: If charging, and deficit excess
+    default:
+      - if:
+          - condition: numeric_state
+            entity_id: sensor.battery_power
+            below: 50
+        then:
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: timer.turn_off_car_charger
+                    state: active
+                sequence:
+                  - target:
+                      entity_id: timer.turn_off_car_charger
+                    action: timer.cancel
+                    data: {}
+            alias: Cancel Timer
+        alias: Cancel Timer if Household Battery is not Discharging
+
+###############################################################################
+# Variables
+###############################################################################
+variables:
+  charger_id: "{{ states(charger_name_id) }}"
+  connector: "{{ charger_id ~ '_status_connector' }}"
+  connector_id: "{{ 'sensor.' ~ connector }}"
+  control: "{{ charger_id ~ '_charge_control' }}"
+  control_id: "{{ 'switch.' ~ control }}"
+  current: "{{ charger_id ~ '_maximum_current' }}"
+  current_id: "{{ 'number.' ~ current }}"
+  status_connector: "{{ states.sensor[connector].state }}"
+  charge_control: "{{ states.switch[control].state }}"
+  maximum_current: "{{ states.number[current].attributes.max }}"
+  max_charging_amps: "{{ maximum_current | int(never_exceed_amps) }}"
+  current_charging_amps: "{{ states(charging_amps_id) | float(0) }}"
+  site_power: "{{ states(power_id) | float }}"
+  solar_power: "{{ states(solar_id) | float(0) }}"
+  voltage: "{{ states(voltage_id) | float(230) }}"
+  local_power: "{{ (battery_discharge_power + solar_power) | float(0) }}"
+  battery_reserve: "{{ states(battery_reserve_id) | float(100) }}"
+  battery_threshold: "{{ states(battery_threshold_id) | float(0) }}"
+  battery_soc: "{{ states(battery_soc_id) | float(0) }}"
+  battery_boost: >-
+    {{ true if battery_soc > battery_threshold and now() <
+    today_at(states(off_peak_end_id)) and states('input_select.charge_mode') ==
+    'Smart' else false | bool }}
+  local_amps: >-
+    {{ (local_power / voltage) if battery_soc > battery_reserve else 0 | float
+    }}
+  excess_amps: "{{ ( site_power / voltage ) * -1.0 | float }}"
+  spare_amps: >-
+    {{ local_amps if states('input_select.charge_mode') == 'Battery' or battery_boost
+    else excess_amps if states('input_select.charge_mode') == 'Smart' else 0
+    | round(0, 'floor') | int }}
+  backup_spare_amps: >-
+    {{ excess_amps if states('input_select.charge_mode') != 'Fast' else 0 |
+    round(0, 'floor') | int }}
+  dampened_spare_amps: >-
+    {{ [spare_amps, minimum_start_amps if (spare_amps > minimum_start_amps and
+    current_charging_amps < minimum_start_amps) else 2 ] | min | round(0,
+    'floor') | int }}
+  working_charge_amps: "{{ (current_charging_amps + dampened_spare_amps) | int }}"
+  new_charge_amps: >-
+    {{ working_charge_amps if working_charge_amps >= min_charging_amps else
+    min_charging_amps }}
+  charge_control_on: "{{ charge_control == 'on' }}"
+  connector_status_charging: "{{ status_connector == 'Charging' }}"
+
+mode: single
+trace:
+  stored_traces: 30
