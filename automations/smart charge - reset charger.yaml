@@ -1,0 +1,35 @@
+alias: Smart Charge - Reset charger after being unplugged
+description: >-
+  Smart Charge - Set charger to smart charge at minimum amps after being
+  unplugged
+triggers:
+  - trigger: state
+    entity_id:
+      - sensor.<replace_with_your_charger_id_here>_status_connector
+    to: Available
+    for:
+      hours: 0
+      minutes: 1
+      seconds: 0
+conditions: []
+actions:
+  - action: input_number.set_value
+    metadata: {}
+    data:
+      value: 6
+    target:
+      entity_id:
+        - input_number.smart_charge_set_amps
+  - action: input_select.select_option
+    metadata: {}
+    target:
+      entity_id: input_select.charge_mode
+    data:
+      option: Smart
+  - action: automation.trigger
+    metadata: {}
+    target:
+      entity_id: automation.smart_charge_set_base_charge_rate
+    data:
+      skip_condition: true
+mode: single

@@ -21,17 +21,11 @@ Create an Smart Charge Set Amps Input Number that you can use to manually set th
 
 Create a Turn Off Car Charger Timer with a timeout of 3:02 (Three Minutes Two Seconds).  This is used to turn off charging after allowing for the sun to come out again (if it was behind a cloud) after the solar output is insufficient to charge in the afternoon by setting charging amps to zero (rather than just a number below 6, which is typically a soft turn off).
 
-Create the four automations.
+Create the five automations.
 
-If you need to alter any of the parameters of the Smart Charge Automation
+Import the blueprint from by clicking the button below, or manually from this address: https://raw.githubusercontent.com/BJReplay/ha-ocpp-charging-automation/refs/heads/main/blueprints/automation/smart_charge.yaml
 
-``` yaml
-  off_charging_amps: 0
-  min_charging_amps: 4
-  minimum_start_amps: 6
-  never_exceed_amps: 32
-```
-then edit the automation in YAML mode, scroll to the bottom, and edit these variables nere the bottom.
+[![Open your Home Assistant and Start a Blueprint Import.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https://raw.githubusercontent.com/BJReplay/ha-ocpp-charging-automation/refs/heads/main/blueprints/automation/smart_charge.yaml)
 
 If you have a period where you can charge for free (e.g. OVO EV plan, Globird Zero Hero between 11am and 2pm), you'll want to a) set up a charging schedule by editing the Smart Charge - Set Charge Amps Schedule to match your free period, and running it once - it sets a baseline schedule that will operate in the charger without any smart control - the default for when the car is plugged in.
 
