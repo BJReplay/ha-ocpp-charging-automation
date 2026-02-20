@@ -1,0 +1,18 @@
+views:
+  - title: Home
+    sections:
+      - type: grid
+        cards:
+          - type: history-graph
+            entities:
+              - entity: sensor.grid_power
+              - entity: sensor.solar_power
+              - entity: sensor.battery_power
+              - entity: sensor.charger_power
+              - entity: sensor.household_load
+            title: Solar Excess Charging Tracking
+            grid_options:
+              columns: full
+              rows: full
+            hours_to_show: 6
+        column_span: 4
