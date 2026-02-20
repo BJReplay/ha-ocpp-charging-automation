@@ -56,7 +56,7 @@ blueprint:
     Helpers can be created on form or at Settings > Devices & Services > Helpers > Create helper.
 
 
-    **Version**: v0.94
+    **Version**: v0.95
 
   domain: automation
 
@@ -74,6 +74,8 @@ blueprint:
           description: >
             Input Number used to control smart charge rate.
             This input number is used to control another automation to set charge rate, and can be placed on a dashboard to manually control charge rate.
+            You must name this "Smart Charge Set Amps" so that the resulting entity is called "input_number.smart_charge_set_amps" so that other automations
+            can correctly utilise the same entity.
               * Default: input_number.smart_charge_set_amps
           default: input_number.smart_charge_set_amps
           selector:
@@ -87,6 +89,8 @@ blueprint:
             This is name of the OCPP charger - often it is just called "charger", 
             but might also be the serial number of the charger - and is used to 
             derive the names of the sensors and controls of the OCPP charger.
+            You must name this Charger Serial so that the resulting entity is called "input_text.charger_serial" so that other automations
+            can correctly utilise the same entity.
               * Default: input_text.charger_serial
           default: input_text.charger_serial
           selector:
@@ -101,6 +105,8 @@ blueprint:
             Specify an Input Select (defined in Home Assistant when you add a Helper as a new Dropdown) to choose the Charge Mode.
             You can automate the changing of the mode to align with your tariffs - for example, set it to Fast during free tariff periods, and to
             Smart when you want to use Excess Solar to charge from excess solar, or Fixed when you want to charge at a fixed rate.
+            You must name this Charge Mode so that the resulting entity is called "input_select.charge_mode" so that other automations
+            can correctly utilise the same entity.
               * Default: input_select.charge_mode
           default: input_select.charge_mode
           selector:
