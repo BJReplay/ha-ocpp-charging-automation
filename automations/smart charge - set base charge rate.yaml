@@ -1,0 +1,26 @@
+alias: Smart Charge - Set Base Charge Rate
+description: Smart Charge - Set Base Charge Rate
+triggers: []
+conditions: []
+actions:
+  - action: ocpp.set_charge_rate
+    data:
+      custom_profile: |
+        {
+           "chargingProfileId": 1,
+           "stackLevel": 0,
+           "chargingProfilePurpose": "TxDefaultProfile",
+           "chargingProfileKind": "Recurring",
+           "recurrencyKind": "Daily",
+           "chargingSchedule": {
+             "startSchedule": "{{start_time}}",
+             "chargingRateUnit": "A",
+             "chargingSchedulePeriod": [{ "startPeriod": 0, "limit": 6 }]
+           }
+        }
+      conn_id: 1
+mode: single
+variables:
+  start_time: >-
+    {{ (now() | as_timestamp + (60)) | timestamp_custom('%Y-%m-%dT%H:%M:%SZ',
+    False)}}
